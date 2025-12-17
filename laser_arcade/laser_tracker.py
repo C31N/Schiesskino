@@ -20,6 +20,7 @@ class LaserDetection:
     area: float
     confidence: float
     frame_ts: float
+    mask_preview: Optional[np.ndarray]
 
 
 class LaserTracker:
@@ -94,9 +95,17 @@ class LaserTracker:
             self.last_point = smoothed
 
         confidence = min(1.0, best_area / max(laser_cfg.min_area, 1))
+
+        mask_preview = None
+        try:
+            preview_small = cv2.resize(mask, (160, 120), interpolation=cv2.INTER_NEAREST)
+            mask_preview = cv2.cvtColor(preview_small, cv2.COLOR_GRAY2RGB)
+        except Exception:
+            LOGGER.debug("Konnte Masken-Vorschau nicht erzeugen", exc_info=True)
         return LaserDetection(
             point=tuple(int(x) for x in smoothed) if smoothed is not None else None,
             area=best_area,
             confidence=confidence,
             frame_ts=time.time(),
+            mask_preview=mask_preview,
         )

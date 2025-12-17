@@ -26,7 +26,7 @@ class TestMode:
             self.last_mapped = pos
 
     def update(self, dt: float) -> None:
-        ...
+        return
 
     def draw(self) -> None:
         self.screen.fill((15, 10, 15))

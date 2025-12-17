@@ -16,17 +16,36 @@ Interaktives Beamer+Kamera-System für Raspberry Pi OS (64-bit). Die Anwendung e
   - Reaktionsspiel
   - Malen
 - Logging nach `~/.laser_arcade/logs/`.
+- Debug-Overlay (FPS, Fläche, Confidence, Masken-Vorschau) zuschaltbar.
+- Best-Effort Auflösungs-Set (1024x768@60) via `xrandr` beim Start.
+
+## Projektstruktur (Auszug)
+- `laser_arcade/__main__.py` – Einstiegspunkt, Display-Setup, App-Routing, Debug-Overlay.
+- `laser_arcade/calibration.py|calibration_ui.py` – 5-Punkt-Kalibrierung, Homographie und UI.
+- `laser_arcade/laser_tracker.py` – HSV-Tracking (2 Rot-Bänder), Morphology, EMA, Masken-Vorschau.
+- `laser_arcade/pointer.py` – Vereinheitlichte Pointer-Events + Dwell-Click.
+- `laser_arcade/apps/` – Spiele (Dosenschießen, Moorhuhn, Zielscheibe, Reaktion, Malen).
+- `install.sh` – Installer inkl. apt, venv, pip, UDEV-Regel, systemd-Service, Autostart.
+- `systemd/laser-arcade.service` – Beispiel-Unit-Datei für Anpassungen.
 
 ## Installation
+### Voraussetzungen
+- Raspberry Pi OS Bookworm 64-bit, Python 3.11+
+- Beamer auf 1024x768 @ 60 Hz (Epson EMP-822 via aktiver Micro-HDMI→VGA-Adapter)
+- Logitech C922 am USB-Port (v4l2)
+
+### Schnelleinrichtung
 ```bash
 ./install.sh
 ```
-Der Installer erledigt:
-- `apt` Pakete (Python, OpenCV, SDL2, v4l-utils, xrandr).
-- Python venv `.venv` + `pip install -r requirements.txt`.
-- Legt `~/.laser_arcade/` inkl. Logs an.
-- Systemd-Service `laser-arcade.service` (User-abhängig, startet `python -m laser_arcade`).
-- Desktop-Autostart als Fallback (`~/.config/autostart/laser-arcade.desktop`).
+Was das Skript tut:
+- Installiert Systemabhängigkeiten (`python3-venv`, `python3-opencv`, SDL2, `v4l-utils`, `x11-xserver-utils`).
+- Legt ein venv `.venv` an und installiert `requirements.txt` (numpy, opencv-python-headless, pygame-ce).
+- Erstellt `~/.laser_arcade/` inkl. `logs/`.
+- Legt eine optionale UDEV-Regel für die Logitech C922 (046d:085c) an (`/dev/video-c922` Alias, Mode 0666).
+- Schreibt/aktiviert `laser-arcade.service` (WorkingDirectory = Repo-Pfad, ExecStart = venv Python).
+- Erstellt Desktop-Autostart-Fallback (`~/.config/autostart/laser-arcade.desktop`).
+- Hinweis auf Reboot, damit systemd/udev aktiv werden.
 
 **Nach der Installation neu booten.**
 
@@ -51,6 +70,7 @@ python -m laser_arcade
 4. Zielen: 4 Ecken + Mitte – der Laserpunkt sollte einige Millisekunden ruhig auf dem Marker bleiben (Dwell-Click löst den Punkt).
 5. Nach allen 5 Punkten wird die Homographie berechnet und in `~/.laser_arcade/calibration.json` gespeichert.
 6. Optional: „Testmodus“ öffnen, Kreuz + Laser/Mapped-Position prüfen. Bei Drift erneut kalibrieren („Re-Align“ durch erneute Kalibrierung).
+7. Debug-Overlay bei Bedarf in `settings.json` (`"debug_overlay": true`) aktivieren.
 
 ## Bedienung
 - Laser oder Maus steuert einen gemeinsamen Pointer. Maus funktioniert immer; Laser-Fallback auf Maus, wenn Kamera fehlt.
@@ -77,6 +97,7 @@ python -m laser_arcade
 - **Auflösung**: `xrandr --output HDMI-1 --mode 1024x768 --rate 60`. Bei Wayland/KMS: gleiches Ziel-Mode setzen.
 - **Performance**: Kamera-Auflösung reduzieren, Debug-Overlay aus lassen.
 - **Autostart**: Systemd-Service prüfen (`journalctl -u laser-arcade`), ansonsten Desktop-Autostart verwenden.
+- **Debug-Overlay**: Zeigt FPS, Fläche, Confidence und Masken-Vorschau. Wenn leer: HSV-Toleranzen erhöhen oder Belichtung manuell setzen.
 
 ## App-Entwicklung (Plugins)
 - Neue Apps im Ordner `laser_arcade/apps/` anlegen, Klasse von `BaseApp` ableiten, `name` setzen, `handle_pointer/update/draw` implementieren.

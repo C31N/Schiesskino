@@ -30,7 +30,7 @@ class TargetApp(BaseApp):
                     break
 
     def update(self, dt: float) -> None:
-        ...
+        return
 
     def draw(self) -> None:
         self.screen.fill((15, 15, 25))

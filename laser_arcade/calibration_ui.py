@@ -32,19 +32,29 @@ class CalibrationUI:
                 try:
                     data = compute_homography(self.camera_points, self.screen_points)
                     self.on_done(data)
-                    self.reset()
+                    self.reset(success_message="Kalibrierung erfolgreich gespeichert.")
                 except Exception as exc:
                     LOGGER.exception("Kalibrierung fehlgeschlagen: %s", exc)
                     self.camera_points = []
                     self.index = 0
+                    self.message = "Fehler – bitte erneut versuchen."
+            else:
+                self.message = "Punkt gesetzt – weiter zum nächsten Marker."
 
-    def reset(self) -> None:
+    def reset(self, success_message: str | None = None) -> None:
         self.index = 0
         self.camera_points = []
         self.screen_points = build_calib_points(*self.screen.get_size())
+        if success_message:
+            self.message = success_message
+        elif len(self.screen_points) == 5:
+            self.message = "Ziele auf den Marker und halte kurz still"
+        else:
+            self.message = "Kalibrierung bereit"
 
     def update(self, dt: float) -> None:
-        ...
+        # Platzhalter für zukünftige Animationen oder Audiofeedback
+        return
 
     def draw(self) -> None:
         self.screen.fill((0, 0, 0))

@@ -31,7 +31,7 @@ class PaintApp(BaseApp):
             self.last_pos = pos
 
     def update(self, dt: float) -> None:
-        ...
+        return
 
     def draw(self) -> None:
         self.screen.fill((0, 0, 0))
