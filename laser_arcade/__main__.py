@@ -161,7 +161,7 @@ def main() -> None:
         elif label == "__test__":
             calibration_active = False
             active_app = None
-            test_mode = TestMode(screen, homography_data.homography, lambda: last_laser_point)
+            test_mode = TestMode(screen, settings, homography_data.homography, lambda: last_laser_point)
         else:
             calibration_active = False
             test_mode = None
@@ -188,6 +188,8 @@ def main() -> None:
             try:
                 detection = tracker.read()
                 last_detection = detection
+                if test_mode:
+                    test_mode.set_detection(detection)
                 last_laser_point = detection.point
                 if detection.point:
                     mapped = (

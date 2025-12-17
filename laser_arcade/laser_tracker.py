@@ -21,6 +21,7 @@ class LaserDetection:
     confidence: float
     frame_ts: float
     mask_preview: Optional[np.ndarray]
+    frame_preview: Optional[np.ndarray]
 
 
 class LaserTracker:
@@ -97,15 +98,22 @@ class LaserTracker:
         confidence = min(1.0, best_area / max(laser_cfg.min_area, 1))
 
         mask_preview = None
+        frame_preview = None
         try:
             preview_small = cv2.resize(mask, (160, 120), interpolation=cv2.INTER_NEAREST)
             mask_preview = cv2.cvtColor(preview_small, cv2.COLOR_GRAY2RGB)
         except Exception:
             LOGGER.debug("Konnte Masken-Vorschau nicht erzeugen", exc_info=True)
+        try:
+            frame_small = cv2.resize(frame, (400, 300), interpolation=cv2.INTER_AREA)
+            frame_preview = cv2.cvtColor(frame_small, cv2.COLOR_BGR2RGB)
+        except Exception:
+            LOGGER.debug("Konnte Kamera-Vorschau nicht erzeugen", exc_info=True)
         return LaserDetection(
             point=tuple(int(x) for x in smoothed) if smoothed is not None else None,
             area=best_area,
             confidence=confidence,
             frame_ts=time.time(),
             mask_preview=mask_preview,
+            frame_preview=frame_preview,
         )
