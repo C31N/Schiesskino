@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 import time
+from typing import Optional
 
 import pygame
 
@@ -12,6 +13,7 @@ from .calibration import apply_homography, build_calib_points, load_homography
 from .calibration_ui import CalibrationUI
 from .config import Settings, load_settings
 from .constants import FPS
+from .laser_tracker import LaserDetection
 from .laser_tracker import LaserTracker
 from .logging_utils import setup_logging
 from .pointer import PointerRouter
@@ -29,12 +31,85 @@ def init_display(settings: Settings) -> pygame.Surface:
     return screen
 
 
+def try_set_resolution(settings: Settings) -> None:
+    """Best-effort Anpassung auf 1024x768@60 via xrandr, falls verfügbar."""
+    import subprocess
+
+    try:
+        result = subprocess.run(["xrandr", "--current"], capture_output=True, text=True, check=True)
+    except FileNotFoundError:
+        LOGGER.info("xrandr nicht verfügbar – überspringe Auflösungs-Check")
+        return
+    except subprocess.CalledProcessError as exc:
+        LOGGER.warning("xrandr-Aufruf fehlgeschlagen: %s", exc)
+        return
+
+    outputs = []
+    for line in result.stdout.splitlines():
+        if " connected" in line:
+            outputs.append(line.split()[0])
+    if not outputs:
+        LOGGER.info("Keine verbundenen Displays von xrandr gemeldet")
+        return
+
+    for output in outputs:
+        cmd = [
+            "xrandr",
+            "--output",
+            output,
+            "--mode",
+            f"{settings.screen_width}x{settings.screen_height}",
+            "--rate",
+            "60",
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode == 0:
+            LOGGER.info("Auflösung über xrandr für %s gesetzt.", output)
+            return
+        LOGGER.warning("Konnte Auflösung für %s nicht setzen: %s", output, res.stderr.strip())
+
+
+def render_debug_overlay(
+    screen: pygame.Surface,
+    detection: Optional[LaserDetection],
+    fps: float,
+) -> None:
+    overlay = pygame.Surface((360, 180), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 160))
+    font = pygame.font.SysFont("Arial", 20)
+    lines = [
+        f"FPS: {fps:.1f}",
+        f"Area: {detection.area if detection else 0:.1f}",
+        f"Confidence: {detection.confidence if detection else 0:.2f}",
+        f"Point: {detection.point if detection else None}",
+    ]
+    for idx, line in enumerate(lines):
+        txt = font.render(line, True, (255, 255, 255))
+        overlay.blit(txt, (10, 10 + idx * 26))
+
+    if detection and detection.mask_preview is not None:
+        try:
+            surf = pygame.image.frombuffer(
+                detection.mask_preview.tobytes(),
+                detection.mask_preview.shape[1::-1],
+                "RGB",
+            )
+            preview_rect = surf.get_rect(bottomright=(overlay.get_width() - 10, overlay.get_height() - 10))
+            pygame.draw.rect(overlay, (200, 200, 200), preview_rect.inflate(6, 6), 1)
+            overlay.blit(surf, preview_rect)
+        except Exception:
+            LOGGER.debug("Fehler beim Rendern der Masken-Vorschau", exc_info=True)
+
+    screen.blit(overlay, (15, 15))
+
+
 def main() -> None:
     setup_logging()
     settings = load_settings()
     pygame.init()
     pygame.font.init()
     clock = pygame.time.Clock()
+    try_set_resolution(settings)
     screen = init_display(settings)
     screen_points = build_calib_points(*screen.get_size())
 
@@ -45,6 +120,7 @@ def main() -> None:
     launcher = launcher_module.Launcher(screen, on_start_app=lambda label: start_app(label))
 
     last_laser_point = None
+    last_detection: Optional[LaserDetection] = None
     tracker = None
     camera_ok = True
     try:
@@ -111,6 +187,7 @@ def main() -> None:
         if tracker:
             try:
                 detection = tracker.read()
+                last_detection = detection
                 last_laser_point = detection.point
                 if detection.point:
                     mapped = (
@@ -144,6 +221,8 @@ def main() -> None:
             txt = font.render("Kamera nicht verfügbar - Maus-Modus aktiv", True, (255, 200, 200))
             overlay.blit(txt, (40, 40))
             screen.blit(overlay, (0, 0))
+        elif settings.debug_overlay:
+            render_debug_overlay(screen, last_detection, clock.get_fps())
 
         pygame.display.flip()
 

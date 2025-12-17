@@ -44,7 +44,7 @@ class CansApp(BaseApp):
                 self.reset()
 
     def update(self, dt: float) -> None:
-        ...
+        return
 
     def draw(self) -> None:
         self.screen.fill((10, 20, 30))

@@ -12,10 +12,10 @@ class BaseApp:
         self.screen = screen
 
     def handle_pointer(self, event_type: str, pos: Tuple[int, int]) -> None:
-        ...
+        return
 
     def update(self, dt: float) -> None:
-        ...
+        return
 
     def draw(self) -> None:
-        ...
+        return
