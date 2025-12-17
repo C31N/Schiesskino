@@ -1,0 +1,13 @@
+[Unit]
+Description=Laser Arcade Service
+After=network.target graphical.target
+
+[Service]
+User=pi
+Environment=PYTHONUNBUFFERED=1
+WorkingDirectory=%h/Schiesskino
+ExecStart=%h/Schiesskino/.venv/bin/python -m laser_arcade
+Restart=on-failure
+
+[Install]
+WantedBy=graphical.target
