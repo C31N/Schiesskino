@@ -8,10 +8,10 @@ import time
 import pygame
 
 from . import launcher as launcher_module
-from .calibration import apply_homography, load_homography
+from .calibration import apply_homography, build_calib_points, load_homography
 from .calibration_ui import CalibrationUI
 from .config import Settings, load_settings
-from .constants import FPS, SCREEN_HEIGHT, SCREEN_WIDTH
+from .constants import FPS
 from .laser_tracker import LaserTracker
 from .logging_utils import setup_logging
 from .pointer import PointerRouter
@@ -36,8 +36,9 @@ def main() -> None:
     pygame.font.init()
     clock = pygame.time.Clock()
     screen = init_display(settings)
+    screen_points = build_calib_points(*screen.get_size())
 
-    homography_data = load_homography()
+    homography_data = load_homography(screen_points)
     active_app = None
     calibration_ui = CalibrationUI(screen, on_done=lambda data: homography_data.__dict__.update(data.__dict__))
     test_mode = None

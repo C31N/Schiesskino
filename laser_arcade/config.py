@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict
 
 from .constants import APP_DIR, CALIBRATION_FILE, CONFIG_FILE, LASER_COLOR_PROFILE
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass
@@ -69,9 +73,13 @@ class Settings:
 def load_settings() -> Settings:
     APP_DIR.mkdir(parents=True, exist_ok=True)
     if CONFIG_FILE.exists():
-        with CONFIG_FILE.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-        return Settings.from_dict(data)
+        try:
+            with CONFIG_FILE.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            return Settings.from_dict(data)
+        except (json.JSONDecodeError, OSError) as exc:
+            LOGGER.warning("Einstellungen defekt, lade Defaults: %s", exc)
+            _backup_corrupt_file(CONFIG_FILE)
     settings = Settings()
     save_settings(settings)
     return settings
@@ -83,11 +91,31 @@ def save_settings(settings: Settings) -> None:
         json.dump(settings.to_dict(), f, indent=2)
 
 
+def _backup_corrupt_file(path: Path) -> None:
+    if not path.exists():
+        return
+    try:
+        backup_path = path.with_suffix(path.suffix + ".bak")
+        counter = 1
+        while backup_path.exists():
+            backup_path = path.with_suffix(path.suffix + f".bak{counter}")
+            counter += 1
+        path.rename(backup_path)
+        LOGGER.info("Defekte Datei gesichert unter %s", backup_path)
+    except OSError as exc:
+        LOGGER.warning("Backup fehlgeschlagen für %s: %s", path, exc)
+
+
 def load_calibration() -> Dict[str, Any] | None:
     if not CALIBRATION_FILE.exists():
         return None
-    with CALIBRATION_FILE.open("r", encoding="utf-8") as f:
-        return json.load(f)
+    try:
+        with CALIBRATION_FILE.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as exc:
+        LOGGER.warning("Kalibrierungsdatei defekt, verwende Defaults: %s", exc)
+        _backup_corrupt_file(CALIBRATION_FILE)
+        return None
 
 
 def save_calibration(matrix, points_camera, points_screen) -> None:
