@@ -13,13 +13,16 @@ from .constants import SCREEN_HEIGHT, SCREEN_WIDTH
 LOGGER = logging.getLogger(__name__)
 
 
-CALIB_POINTS = [
-    (0, 0),
-    (SCREEN_WIDTH - 1, 0),
-    (SCREEN_WIDTH - 1, SCREEN_HEIGHT - 1),
-    (0, SCREEN_HEIGHT - 1),
-    (SCREEN_WIDTH // 2, SCREEN_HEIGHT // 2),
-]
+def build_calib_points(width: int, height: int) -> List[Tuple[int, int]]:
+    """Baue die Kalibrierpunkte basierend auf der tatsächlichen Bildschirmgröße."""
+
+    return [
+        (0, 0),
+        (width - 1, 0),
+        (width - 1, height - 1),
+        (0, height - 1),
+        (width // 2, height // 2),
+    ]
 
 
 @dataclass
@@ -29,29 +32,42 @@ class CalibrationData:
     screen_points: List[Tuple[int, int]]
 
 
-def compute_homography(camera_points: List[Tuple[int, int]]) -> CalibrationData:
-    if len(camera_points) != len(CALIB_POINTS):
-        raise ValueError("Es werden genau 5 Punkte benötigt")
+def compute_homography(
+    camera_points: List[Tuple[int, int]],
+    screen_points: Optional[List[Tuple[int, int]]] = None,
+) -> CalibrationData:
+    screen_points = screen_points or build_calib_points(SCREEN_WIDTH, SCREEN_HEIGHT)
+    if len(camera_points) != len(screen_points):
+        raise ValueError(f"Es werden genau {len(screen_points)} Punkte benötigt")
 
     src = np.array(camera_points, dtype=np.float32)
-    dst = np.array(CALIB_POINTS, dtype=np.float32)
+    dst = np.array(screen_points, dtype=np.float32)
     H, mask = cv2.findHomography(src, dst, cv2.RANSAC)
     if H is None:
         raise RuntimeError("Homographie konnte nicht berechnet werden")
     LOGGER.info("Homographie berechnet. mask=%s", mask.ravel().tolist())
-    save_calibration(H, camera_points, CALIB_POINTS)
-    return CalibrationData(homography=H, camera_points=camera_points, screen_points=CALIB_POINTS)
+    save_calibration(H, camera_points, screen_points)
+    return CalibrationData(homography=H, camera_points=camera_points, screen_points=screen_points)
 
 
-def load_homography() -> CalibrationData:
+def load_homography(screen_points: Optional[List[Tuple[int, int]]] = None) -> CalibrationData:
+    screen_points = screen_points or build_calib_points(SCREEN_WIDTH, SCREEN_HEIGHT)
     stored = load_calibration()
     if not stored or stored.get("homography") is None:
-        return CalibrationData(homography=None, camera_points=[], screen_points=CALIB_POINTS)
+        return CalibrationData(homography=None, camera_points=[], screen_points=screen_points)
     H = np.array(stored["homography"], dtype=np.float32)
+    stored_screen_points = stored.get("screen_points") or screen_points
+    camera_points = stored.get("camera_points", [])
+    if len(camera_points) != len(stored_screen_points):
+        LOGGER.warning(
+            "Ungültige Kalibrierdaten: Anzahl Kamera- (%s) und Screen-Punkte (%s) stimmt nicht überein",
+            len(camera_points),
+            len(stored_screen_points),
+        )
     return CalibrationData(
         homography=H,
-        camera_points=stored.get("camera_points", []),
-        screen_points=stored.get("screen_points", CALIB_POINTS),
+        camera_points=camera_points,
+        screen_points=stored_screen_points,
     )
 
 

@@ -5,7 +5,7 @@ from typing import List, Tuple
 
 import pygame
 
-from .calibration import CALIB_POINTS, compute_homography
+from .calibration import build_calib_points, compute_homography
 from .ui import make_font
 
 LOGGER = logging.getLogger(__name__)
@@ -19,17 +19,18 @@ class CalibrationUI:
         self.index = 0
         self.camera_points: List[Tuple[int, int]] = []
         self.message = "Ziele auf den Marker und halte kurz still"
+        self.screen_points: List[Tuple[int, int]] = build_calib_points(*self.screen.get_size())
 
     def target_point(self) -> Tuple[int, int]:
-        return CALIB_POINTS[self.index]
+        return self.screen_points[self.index]
 
     def handle_pointer(self, event_type: str, pos: Tuple[int, int]) -> None:
         if event_type == "click":
             self.camera_points.append(pos)
             self.index += 1
-            if self.index >= len(CALIB_POINTS):
+            if self.index >= len(self.screen_points):
                 try:
-                    data = compute_homography(self.camera_points)
+                    data = compute_homography(self.camera_points, self.screen_points)
                     self.on_done(data)
                     self.reset()
                 except Exception as exc:
@@ -40,6 +41,7 @@ class CalibrationUI:
     def reset(self) -> None:
         self.index = 0
         self.camera_points = []
+        self.screen_points = build_calib_points(*self.screen.get_size())
 
     def update(self, dt: float) -> None:
         ...
@@ -49,7 +51,7 @@ class CalibrationUI:
         target = self.target_point()
         pygame.draw.circle(self.screen, (255, 255, 255), target, 18, 3)
         pygame.draw.circle(self.screen, (0, 200, 0), target, 6)
-        info = f"Punkt {self.index + 1} / {len(CALIB_POINTS)}"
+        info = f"Punkt {self.index + 1} / {len(self.screen_points)}"
         text = self.font.render(info, True, (255, 255, 255))
         msg = self.font.render(self.message, True, (200, 200, 200))
         self.screen.blit(text, (20, 20))
