@@ -43,6 +43,18 @@ class ResolutionOption:
         return f"{self.width}x{self.height} ({ratio})"
 
 
+@dataclass
+class CameraFormatOption:
+    width: int
+    height: int
+    fps: int
+
+    def label(self) -> str:
+        divisor = gcd(self.width, self.height)
+        ratio = f"{self.width // divisor}:{self.height // divisor}" if divisor else "-"
+        return f"{self.width}x{self.height} @ {self.fps}fps ({ratio})"
+
+
 class TestMode:
     name = "Testmodus"
 
@@ -71,6 +83,8 @@ class TestMode:
 
         self.camera_options: List[CameraOption] = self._discover_cameras()
         self.selected_option = self._find_selected_option()
+        self.format_options: List[CameraFormatOption] = self._build_format_options()
+        self.selected_format = self._find_selected_format()
         self.resolution_options: List[ResolutionOption] = [
             ResolutionOption(1024, 768),
             ResolutionOption(1280, 720),
@@ -79,14 +93,22 @@ class TestMode:
         ]
         self.selected_resolution = self._find_selected_resolution()
         self.camera_buttons: List[Button] = []
+        self.format_buttons: List[Button] = []
         self.resolution_buttons: List[Button] = []
         self.apply_button: Optional[Button] = None
         self.reload_button: Optional[Button] = None
         self.status_message: Optional[str] = None
+        self.last_frame_preview = None
+        self.last_mask_preview = None
         self._build_buttons()
 
     def set_detection(self, detection: Optional[LaserDetection]) -> None:
         self.last_detection = detection
+        if detection:
+            if detection.frame_preview is not None:
+                self.last_frame_preview = detection.frame_preview
+            if detection.mask_preview is not None:
+                self.last_mask_preview = detection.mask_preview
 
     def set_camera_status(self, ok: bool, message: Optional[str]) -> None:
         self.camera_ok = ok
@@ -104,6 +126,10 @@ class TestMode:
             if self.apply_button and self.apply_button.contains(pos):
                 self.apply_button.action()
                 return
+            for btn in self.format_buttons:
+                if btn.contains(pos):
+                    btn.action()
+                    return
             for btn in self.resolution_buttons:
                 if btn.contains(pos):
                     btn.action()
@@ -136,6 +162,9 @@ class TestMode:
         fps = int(cap.get(cv2.CAP_PROP_FPS)) if available else 0
         if cap is not None:
             cap.release()
+        width = width if width > 0 else self.settings.camera.width
+        height = height if height > 0 else self.settings.camera.height
+        fps = fps if fps > 0 else self.settings.camera.fps
         return CameraOption(
             index=index,
             path=path,
@@ -151,6 +180,33 @@ class TestMode:
                 return opt
         return self.camera_options[0] if self.camera_options else None
 
+    def _build_format_options(self) -> List[CameraFormatOption]:
+        defaults = [
+            CameraFormatOption(640, 480, 30),
+            CameraFormatOption(800, 600, 30),
+            CameraFormatOption(1024, 768, 30),
+            CameraFormatOption(1280, 720, 30),
+        ]
+        # Ensure current settings are always selectable
+        current = CameraFormatOption(
+            self.settings.camera.width,
+            self.settings.camera.height,
+            self.settings.camera.fps,
+        )
+        options = { (opt.width, opt.height, opt.fps): opt for opt in defaults }
+        options[(current.width, current.height, current.fps)] = current
+        return list(options.values())
+
+    def _find_selected_format(self) -> Optional[CameraFormatOption]:
+        for opt in self.format_options:
+            if (
+                opt.width == self.settings.camera.width
+                and opt.height == self.settings.camera.height
+                and opt.fps == self.settings.camera.fps
+            ):
+                return opt
+        return self.format_options[0] if self.format_options else None
+
     def _find_selected_resolution(self) -> Optional[ResolutionOption]:
         for opt in self.resolution_options:
             if opt.width == self.settings.screen_width and opt.height == self.settings.screen_height:
@@ -159,6 +215,7 @@ class TestMode:
 
     def _build_buttons(self) -> None:
         self.camera_buttons = []
+        self.format_buttons = []
         self.resolution_buttons = []
         panel_width = 380
         x = self.screen.get_width() - panel_width - 20
@@ -188,7 +245,33 @@ class TestMode:
             bg_color=(40, 160, 80),
         )
 
-        res_section_y = apply_y + 70
+        format_section_y = apply_y + 70
+        format_button_height = 40
+        for idx, opt in enumerate(self.format_options):
+            rect = pygame.Rect(
+                x,
+                format_section_y + idx * (format_button_height + spacing),
+                panel_width,
+                format_button_height,
+            )
+            bg_color = (100, 100, 150)
+            if self.selected_format and (opt.width, opt.height, opt.fps) == (
+                self.selected_format.width,
+                self.selected_format.height,
+                self.selected_format.fps,
+            ):
+                bg_color = (80, 140, 200)
+            self.format_buttons.append(
+                Button(
+                    rect=rect,
+                    label=opt.label(),
+                    action=lambda o=opt: self._select_format(o),
+                    font=self.button_font,
+                    bg_color=bg_color,
+                )
+            )
+
+        res_section_y = format_section_y + max(len(self.format_options), 1) * (format_button_height + spacing) + 26
         res_button_height = 42
         for idx, opt in enumerate(self.resolution_options):
             rect = pygame.Rect(x, res_section_y + idx * (res_button_height + spacing), panel_width, res_button_height)
@@ -222,6 +305,11 @@ class TestMode:
         self.status_message = None
         self._build_buttons()
 
+    def _select_format(self, option: CameraFormatOption) -> None:
+        self.selected_format = option
+        self.status_message = None
+        self._build_buttons()
+
     def _select_resolution(self, option: ResolutionOption) -> None:
         self.selected_resolution = option
         self.status_message = None
@@ -238,9 +326,14 @@ class TestMode:
             return
         cam_cfg = self.settings.camera
         cam_cfg.device_index = self.selected_option.index
-        cam_cfg.width = self.selected_option.width
-        cam_cfg.height = self.selected_option.height
-        cam_cfg.fps = self.selected_option.fps
+        if self.selected_format:
+            cam_cfg.width = max(1, self.selected_format.width)
+            cam_cfg.height = max(1, self.selected_format.height)
+            cam_cfg.fps = max(1, self.selected_format.fps)
+        else:
+            cam_cfg.width = max(1, self.selected_option.width)
+            cam_cfg.height = max(1, self.selected_option.height)
+            cam_cfg.fps = max(1, self.selected_option.fps)
         save_settings(self.settings)
         if self.on_camera_change:
             ok, message = self.on_camera_change()
@@ -269,12 +362,17 @@ class TestMode:
         mapped = apply_homography(self.homography, laser_pos) if (self.homography is not None and laser_pos) else None
 
         preview_rect = None
+        frame_preview = None
         if detection and detection.frame_preview is not None:
+            frame_preview = detection.frame_preview
+        elif self.last_frame_preview is not None:
+            frame_preview = self.last_frame_preview
+
+        if frame_preview is not None:
             try:
-                preview = detection.frame_preview
                 surf = pygame.image.frombuffer(
-                    preview.tobytes(),
-                    preview.shape[1::-1],
+                    frame_preview.tobytes(),
+                    frame_preview.shape[1::-1],
                     "RGB",
                 )
                 preview_rect = surf.get_rect(topleft=(20, 80))
@@ -283,11 +381,17 @@ class TestMode:
             except Exception:
                 LOGGER.debug("Konnte Kamera-Preview nicht anzeigen", exc_info=True)
 
+        mask_preview = None
         if detection and detection.mask_preview is not None:
+            mask_preview = detection.mask_preview
+        elif self.last_mask_preview is not None:
+            mask_preview = self.last_mask_preview
+
+        if mask_preview is not None:
             try:
                 surf = pygame.image.frombuffer(
-                    detection.mask_preview.tobytes(),
-                    detection.mask_preview.shape[1::-1],
+                    mask_preview.tobytes(),
+                    mask_preview.shape[1::-1],
                     "RGB",
                 )
                 offset_x = preview_rect.right + 20 if preview_rect else 20
@@ -322,6 +426,7 @@ class TestMode:
             "Kamera-Preview (USB Logitech C922 PRO empfohlen)",
             f"Aktiv: /dev/video{camera.device_index} @ {camera.width}x{camera.height} {camera.fps}fps",
             f"Auflösung: {self.settings.screen_width}x{self.settings.screen_height}",
+            "Einstellungen werden nach Auswahl gespeichert und Kamera neu gestartet.",
             "Nutze das Bild zum Ausrichten und zur Belichtung (z.B. v4l2-ctl).",
         ]
         for idx, line in enumerate(info_lines):
@@ -346,7 +451,8 @@ class TestMode:
         status_y = panel_rect.y + 74
         status_lines = [
             f"Kamera: {self.selected_option.label() if self.selected_option else '—'}",
-            f"Auflösung: {self.selected_resolution.label() if self.selected_resolution else '—'}",
+            f"Format: {self.selected_format.label() if self.selected_format else '—'}",
+            f"Anzeige: {self.selected_resolution.label() if self.selected_resolution else '—'}",
         ]
         for idx, line in enumerate(status_lines):
             surf = self.info_font.render(line, True, (220, 220, 220))
@@ -370,8 +476,19 @@ class TestMode:
         if self.apply_button:
             self.apply_button.draw(self.screen)
 
-        res_section_y = self.apply_button.rect.bottom + 30 if self.apply_button else camera_section_y + 120
-        res_title = self.info_font.render("Auflösung & Seitenverhältnis", True, (230, 230, 250))
+        format_section_y = self.apply_button.rect.bottom + 20 if self.apply_button else camera_section_y + 100
+        format_title = self.info_font.render("Kamera-Format", True, (230, 230, 250))
+        self.screen.blit(format_title, (panel_rect.x + 16, format_section_y))
+
+        for btn in self.format_buttons:
+            btn.draw(self.screen)
+
+        res_section_y = (
+            self.format_buttons[-1].rect.bottom + 30
+            if self.format_buttons
+            else format_section_y + 100
+        )
+        res_title = self.info_font.render("Anzeige-Auflösung", True, (230, 230, 250))
         self.screen.blit(res_title, (panel_rect.x + 16, res_section_y))
 
         for btn in self.resolution_buttons:
