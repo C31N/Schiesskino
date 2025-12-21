@@ -132,6 +132,26 @@ def main() -> None:
         camera_ok = False
         camera_error = str(exc)
 
+    def reinitialize_display() -> Optional[str]:
+        nonlocal screen, screen_points, homography_data, launcher, calibration_ui, active_app, test_mode
+        try_set_resolution(settings)
+        screen = init_display(settings)
+        screen_points = build_calib_points(*screen.get_size())
+        homography_data = load_homography(screen_points)
+        calibration_ui.screen = screen
+        calibration_ui.reset()
+        launcher = launcher_module.Launcher(screen, on_start_app=lambda label: start_app(label))
+        if test_mode:
+            test_mode.update_context(screen, homography_data.homography)
+        if active_app:
+            app_cls = type(active_app)
+            try:
+                active_app = app_cls(screen)
+            except Exception:
+                LOGGER.exception("Aktive App konnte nach Auflösungswechsel nicht neu gestartet werden.")
+                active_app = None
+        return "Anzeige neu initialisiert."
+
     def restart_tracker() -> tuple[bool, Optional[str]]:
         nonlocal tracker, camera_ok, camera_error
         if tracker:
@@ -188,6 +208,7 @@ def main() -> None:
                 homography_data.homography,
                 lambda: last_laser_point,
                 on_camera_change=restart_tracker,
+                on_resolution_change=reinitialize_display,
             )
             test_mode.set_camera_status(camera_ok, camera_error)
         else:
