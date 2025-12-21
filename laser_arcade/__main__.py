@@ -123,12 +123,33 @@ def main() -> None:
     last_detection: Optional[LaserDetection] = None
     tracker = None
     camera_ok = True
+    camera_error: Optional[str] = None
     try:
         tracker = LaserTracker(settings)
         tracker.start()
     except Exception as exc:
         LOGGER.warning("Kamera-Start fehlgeschlagen, Maus-Modus aktiv: %s", exc)
         camera_ok = False
+        camera_error = str(exc)
+
+    def restart_tracker() -> tuple[bool, Optional[str]]:
+        nonlocal tracker, camera_ok, camera_error
+        if tracker:
+            tracker.stop()
+        tracker = None
+        camera_error = None
+        camera_ok = True
+        try:
+            tracker = LaserTracker(settings)
+            tracker.start()
+            LOGGER.info("Kamera nach Auswahl neu gestartet.")
+        except Exception as exc:
+            LOGGER.warning("Kamera-Start fehlgeschlagen: %s", exc)
+            camera_ok = False
+            camera_error = str(exc)
+        if test_mode:
+            test_mode.set_camera_status(camera_ok, camera_error)
+        return camera_ok, camera_error
 
     def pointer_handler(evt):
         nonlocal active_app, launcher, calibration_ui, test_mode
@@ -161,7 +182,14 @@ def main() -> None:
         elif label == "__test__":
             calibration_active = False
             active_app = None
-            test_mode = TestMode(screen, settings, homography_data.homography, lambda: last_laser_point)
+            test_mode = TestMode(
+                screen,
+                settings,
+                homography_data.homography,
+                lambda: last_laser_point,
+                on_camera_change=restart_tracker,
+            )
+            test_mode.set_camera_status(camera_ok, camera_error)
         else:
             calibration_active = False
             test_mode = None
@@ -203,6 +231,9 @@ def main() -> None:
                 tracker.stop()
                 tracker = None
                 camera_ok = False
+                camera_error = str(exc)
+                if test_mode:
+                    test_mode.set_camera_status(camera_ok, camera_error)
 
         if calibration_active:
             calibration_ui.update(dt)
@@ -220,7 +251,11 @@ def main() -> None:
             overlay = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
             overlay.fill((0, 0, 0, 120))
             font = pygame.font.SysFont("Arial", 28)
-            txt = font.render("Kamera nicht verfügbar - Maus-Modus aktiv", True, (255, 200, 200))
+            txt = font.render(
+                f"Kamera nicht verfügbar - Maus-Modus aktiv ({camera_error or 'unbekannt'})",
+                True,
+                (255, 200, 200),
+            )
             overlay.blit(txt, (40, 40))
             screen.blit(overlay, (0, 0))
         elif settings.debug_overlay:
