@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from math import gcd
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
@@ -31,6 +32,17 @@ class CameraOption:
         return f"/dev/video{self.index} ({self.width}x{self.height} @ {self.fps}fps)"
 
 
+@dataclass
+class ResolutionOption:
+    width: int
+    height: int
+
+    def label(self) -> str:
+        divisor = gcd(self.width, self.height)
+        ratio = f"{self.width // divisor}:{self.height // divisor}" if divisor else "-"
+        return f"{self.width}x{self.height} ({ratio})"
+
+
 class TestMode:
     name = "Testmodus"
 
@@ -41,6 +53,7 @@ class TestMode:
         homography,
         last_point_provider,
         on_camera_change: Optional[Callable[[], Tuple[bool, Optional[str]]]] = None,
+        on_resolution_change: Optional[Callable[[], Optional[str]]] = None,
     ):
         self.screen = screen
         self.font = make_font(26)
@@ -52,13 +65,23 @@ class TestMode:
         self.last_mapped = None
         self.last_detection: Optional[LaserDetection] = None
         self.on_camera_change = on_camera_change
+        self.on_resolution_change = on_resolution_change
         self.camera_ok = True
         self.camera_error: Optional[str] = None
 
         self.camera_options: List[CameraOption] = self._discover_cameras()
         self.selected_option = self._find_selected_option()
+        self.resolution_options: List[ResolutionOption] = [
+            ResolutionOption(1024, 768),
+            ResolutionOption(1280, 720),
+            ResolutionOption(1600, 900),
+            ResolutionOption(1920, 1080),
+        ]
+        self.selected_resolution = self._find_selected_resolution()
         self.camera_buttons: List[Button] = []
+        self.resolution_buttons: List[Button] = []
         self.apply_button: Optional[Button] = None
+        self.reload_button: Optional[Button] = None
         self.status_message: Optional[str] = None
         self._build_buttons()
 
@@ -80,6 +103,13 @@ class TestMode:
                     return
             if self.apply_button and self.apply_button.contains(pos):
                 self.apply_button.action()
+                return
+            for btn in self.resolution_buttons:
+                if btn.contains(pos):
+                    btn.action()
+                    return
+            if self.reload_button and self.reload_button.contains(pos):
+                self.reload_button.action()
 
     def update(self, dt: float) -> None:
         return
@@ -121,8 +151,15 @@ class TestMode:
                 return opt
         return self.camera_options[0] if self.camera_options else None
 
+    def _find_selected_resolution(self) -> Optional[ResolutionOption]:
+        for opt in self.resolution_options:
+            if opt.width == self.settings.screen_width and opt.height == self.settings.screen_height:
+                return opt
+        return self.resolution_options[0] if self.resolution_options else None
+
     def _build_buttons(self) -> None:
         self.camera_buttons = []
+        self.resolution_buttons = []
         panel_width = 380
         x = self.screen.get_width() - panel_width - 20
         y = 100
@@ -151,8 +188,42 @@ class TestMode:
             bg_color=(40, 160, 80),
         )
 
+        res_section_y = apply_y + 70
+        res_button_height = 42
+        for idx, opt in enumerate(self.resolution_options):
+            rect = pygame.Rect(x, res_section_y + idx * (res_button_height + spacing), panel_width, res_button_height)
+            bg_color = (90, 110, 160)
+            if self.selected_resolution and (opt.width, opt.height) == (
+                self.selected_resolution.width,
+                self.selected_resolution.height,
+            ):
+                bg_color = (110, 150, 210)
+            self.resolution_buttons.append(
+                Button(
+                    rect=rect,
+                    label=opt.label(),
+                    action=lambda o=opt: self._select_resolution(o),
+                    font=self.button_font,
+                    bg_color=bg_color,
+                )
+            )
+
+        reload_y = res_section_y + max(len(self.resolution_options), 1) * (res_button_height + spacing) + 6
+        self.reload_button = Button(
+            rect=pygame.Rect(x, reload_y, panel_width, 50),
+            label="Übernehmen/Neu laden",
+            action=self._apply_resolution,
+            font=self.button_font,
+            bg_color=(70, 170, 110),
+        )
+
     def _select_camera(self, option: CameraOption) -> None:
         self.selected_option = option
+        self.status_message = None
+        self._build_buttons()
+
+    def _select_resolution(self, option: ResolutionOption) -> None:
+        self.selected_resolution = option
         self.status_message = None
         self._build_buttons()
 
@@ -176,6 +247,20 @@ class TestMode:
             self.camera_ok = ok
             self.camera_error = message
         self.status_message = "Gespeichert und Kamera neu gestartet." if self.camera_ok else self.camera_error
+
+    def _apply_resolution(self) -> None:
+        if not self.selected_resolution:
+            self.status_message = "Keine Auflösung ausgewählt."
+            return
+        self.settings.screen_width = self.selected_resolution.width
+        self.settings.screen_height = self.selected_resolution.height
+        save_settings(self.settings)
+        try:
+            reload_message = self.on_resolution_change() if self.on_resolution_change else None
+            self.status_message = reload_message or "Auflösung übernommen."
+        except Exception:
+            LOGGER.exception("Konnte Anzeige nicht neu initialisieren")
+            self.status_message = "Fehler beim Neuaufbau der Anzeige."
 
     def draw(self) -> None:
         self.screen.fill((15, 10, 15))
@@ -225,6 +310,9 @@ class TestMode:
             pygame.draw.line(self.screen, (0, 255, 0), cross[0], cross[1], 2)
             pygame.draw.line(self.screen, (0, 255, 0), cross[2], cross[3], 2)
 
+        mode_text = self.info_font.render(f"Aktiver Modus: {self.name}", True, (210, 210, 230))
+        self.screen.blit(mode_text, (20, 52))
+
         txt = f"Laser: {laser_pos} | Mapped: {mapped}"
         text = self.font.render(txt, True, (255, 255, 255))
         self.screen.blit(text, (20, 20))
@@ -233,6 +321,7 @@ class TestMode:
         info_lines = [
             "Kamera-Preview (USB Logitech C922 PRO empfohlen)",
             f"Aktiv: /dev/video{camera.device_index} @ {camera.width}x{camera.height} {camera.fps}fps",
+            f"Auflösung: {self.settings.screen_width}x{self.settings.screen_height}",
             "Nutze das Bild zum Ausrichten und zur Belichtung (z.B. v4l2-ctl).",
         ]
         for idx, line in enumerate(info_lines):
@@ -248,7 +337,7 @@ class TestMode:
         pygame.draw.rect(self.screen, (28, 28, 40), panel_rect, border_radius=10)
         pygame.draw.rect(self.screen, (80, 80, 120), panel_rect, 2, border_radius=10)
 
-        title = self.font.render("Kamera-Auswahl", True, (255, 255, 255))
+        title = self.font.render("Kamera- & Anzeige", True, (255, 255, 255))
         self.screen.blit(title, (panel_rect.x + 16, panel_rect.y + 14))
 
         hint = self.info_font.render("Standard: Logitech C922 PRO", True, (210, 210, 210))
@@ -256,7 +345,8 @@ class TestMode:
 
         status_y = panel_rect.y + 74
         status_lines = [
-            f"Gewählt: {self.selected_option.label() if self.selected_option else '—'}",
+            f"Kamera: {self.selected_option.label() if self.selected_option else '—'}",
+            f"Auflösung: {self.selected_resolution.label() if self.selected_resolution else '—'}",
         ]
         for idx, line in enumerate(status_lines):
             surf = self.info_font.render(line, True, (220, 220, 220))
@@ -271,7 +361,25 @@ class TestMode:
             status_txt = self.info_font.render(self.status_message, True, (140, 220, 140))
             self.screen.blit(status_txt, (panel_rect.x + 16, status_y + 44))
 
+        camera_section_y = status_y + 80
+        cam_title = self.info_font.render("Kamera-Geräte", True, (230, 230, 250))
+        self.screen.blit(cam_title, (panel_rect.x + 16, camera_section_y))
+
         for btn in self.camera_buttons:
             btn.draw(self.screen)
         if self.apply_button:
             self.apply_button.draw(self.screen)
+
+        res_section_y = self.apply_button.rect.bottom + 30 if self.apply_button else camera_section_y + 120
+        res_title = self.info_font.render("Auflösung & Seitenverhältnis", True, (230, 230, 250))
+        self.screen.blit(res_title, (panel_rect.x + 16, res_section_y))
+
+        for btn in self.resolution_buttons:
+            btn.draw(self.screen)
+        if self.reload_button:
+            self.reload_button.draw(self.screen)
+
+    def update_context(self, screen: pygame.Surface, homography) -> None:
+        self.screen = screen
+        self.homography = homography
+        self._build_buttons()
