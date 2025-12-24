@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import logging
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Union
 
 import pygame
 
@@ -14,6 +15,13 @@ MOORHUHN_DIR = Path(__file__).with_name("moorhuhn")
 ASSETS_DIR = MOORHUHN_DIR / "img"
 SOUNDS_DIR = MOORHUHN_DIR / "sounds"
 FONTS_DIR = MOORHUHN_DIR / "fonts"
+
+LOGGER = logging.getLogger(__name__)
+
+
+class _SilentSound:
+    def play(self, *_, **__) -> None:
+        return
 
 
 def _sorted_by_number(paths: List[Path]) -> List[Path]:
@@ -28,8 +36,12 @@ def _load_images(directory: Path) -> List[pygame.Surface]:
     return [pygame.image.load(str(path)).convert_alpha() for path in _sorted_by_number(list(directory.glob("*.png")))]
 
 
-def _load_sound(path: Path) -> pygame.mixer.Sound:
-    return pygame.mixer.Sound(str(path))
+def _load_sound(path: Path) -> Union[pygame.mixer.Sound, _SilentSound]:
+    try:
+        return pygame.mixer.Sound(str(path))
+    except Exception:
+        LOGGER.warning("Konnte Sound nicht laden: %s", path, exc_info=True)
+        return _SilentSound()
 
 
 def _scale_frames(frames: List[pygame.Surface], size: Tuple[int, int], flip: bool) -> List[pygame.Surface]:
@@ -88,8 +100,13 @@ class ChickenApp(BaseApp):
 
     def __init__(self, screen: pygame.Surface):
         super().__init__(screen)
+        self.audio_available = True
         if not pygame.mixer.get_init():
-            pygame.mixer.init()
+            try:
+                pygame.mixer.init()
+            except Exception:
+                LOGGER.warning("Audio konnte nicht initialisiert werden, fahre ohne Sound fort.", exc_info=True)
+                self.audio_available = False
         self.base_flight_frames = _load_images(ASSETS_DIR / "chicken_flight")
         self.base_death_frames = _load_images(ASSETS_DIR / "chicken_flight_death")
         self.cursor_image = pygame.image.load(str(ASSETS_DIR / "cursor" / "cursor.png")).convert_alpha()
@@ -112,7 +129,16 @@ class ChickenApp(BaseApp):
         self.crosshair_flash = False
         self.ambient_channel: pygame.mixer.Channel | None = None
 
-    def _load_sounds(self) -> Dict[str, pygame.mixer.Sound]:
+    def _load_sounds(self) -> Dict[str, Union[pygame.mixer.Sound, _SilentSound]]:
+        if not self.audio_available:
+            return {
+                "shot": _SilentSound(),
+                "hit": [_SilentSound(), _SilentSound(), _SilentSound()],
+                "ambient": _SilentSound(),
+                "game_over": _SilentSound(),
+                "main_theme": _SilentSound(),
+                "button": _SilentSound(),
+            }
         return {
             "shot": _load_sound(SOUNDS_DIR / "gun_shot_sound.ogg"),
             "hit": [
@@ -169,6 +195,8 @@ class ChickenApp(BaseApp):
         self._play_music(loop=True)
 
     def _play_music(self, loop: bool = False) -> None:
+        if not self.audio_available:
+            return
         if self.ambient_channel is None:
             self.ambient_channel = pygame.mixer.find_channel()
         if self.ambient_channel:
@@ -176,7 +204,7 @@ class ChickenApp(BaseApp):
             self.ambient_channel.play(sound, loops=-1 if loop else 0)
 
     def _stop_music(self) -> None:
-        if self.ambient_channel:
+        if self.audio_available and self.ambient_channel:
             self.ambient_channel.stop()
 
     def _shoot(self) -> None:
