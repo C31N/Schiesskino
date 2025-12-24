@@ -117,7 +117,17 @@ def main() -> None:
     active_app = None
     calibration_ui = CalibrationUI(screen, on_done=lambda data: homography_data.__dict__.update(data.__dict__))
     test_mode = None
-    launcher = launcher_module.Launcher(screen, on_start_app=lambda label: start_app(label))
+    running = True
+
+    def quit_app():
+        nonlocal running
+        running = False
+
+    launcher = launcher_module.Launcher(
+        screen,
+        on_start_app=lambda label: start_app(label),
+        on_quit=quit_app,
+    )
 
     last_laser_point = None
     last_detection: Optional[LaserDetection] = None
@@ -140,7 +150,11 @@ def main() -> None:
         homography_data = load_homography(screen_points)
         calibration_ui.screen = screen
         calibration_ui.reset()
-        launcher = launcher_module.Launcher(screen, on_start_app=lambda label: start_app(label))
+        launcher = launcher_module.Launcher(
+            screen,
+            on_start_app=lambda label: start_app(label),
+            on_quit=quit_app,
+        )
         if test_mode:
             test_mode.update_context(screen, homography_data.homography)
         if active_app:
@@ -190,8 +204,6 @@ def main() -> None:
     )
 
     calibration_active = False
-    running = True
-
     def start_app(label: str):
         nonlocal active_app, calibration_active, test_mode
         if label == "__calibrate__":

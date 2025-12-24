@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, Optional, Tuple, Type
+from typing import Callable, Dict, Tuple, Type
 
 import pygame
 
@@ -27,9 +27,15 @@ APP_CLASSES: Dict[str, Type[BaseApp]] = {
 
 
 class Launcher:
-    def __init__(self, screen: pygame.Surface, on_start_app):
+    def __init__(
+        self,
+        screen: pygame.Surface,
+        on_start_app: Callable[[str], None],
+        on_quit: Callable[[], None],
+    ):
         self.screen = screen
         self.on_start_app = on_start_app
+        self.on_quit = on_quit
         self.font = make_font(DEFAULT_FONT_SIZE)
         self.title_font = make_font(TITLE_FONT_SIZE)
         self.buttons = self._create_buttons()
@@ -57,7 +63,7 @@ class Launcher:
         elif label == "Testmodus":
             self.on_start_app("__test__")
         elif label == "Beenden":
-            pygame.event.post(pygame.event.Event(pygame.QUIT))
+            self.on_quit()
 
     def handle_pointer(self, event_type: str, pos: Tuple[int, int]) -> None:
         if event_type == "click":
