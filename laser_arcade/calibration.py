@@ -42,10 +42,24 @@ def compute_homography(
 
     src = np.array(camera_points, dtype=np.float32)
     dst = np.array(screen_points, dtype=np.float32)
-    H, mask = cv2.findHomography(src, dst, cv2.RANSAC)
+    unique_camera = np.unique(src, axis=0)
+    unique_screen = np.unique(dst, axis=0)
+    if len(unique_camera) < 4 or len(unique_screen) < 4:
+        raise ValueError("Mindestens 4 eindeutige Punkte erforderlich, bitte erneut kalibrieren.")
+
+    H, mask = cv2.findHomography(src, dst, cv2.RANSAC, ransacReprojThreshold=8.0)
+    inliers = int(mask.sum()) if mask is not None else 0
+    if H is None or inliers < 4:
+        LOGGER.warning("Homographie mit RANSAC fehlgeschlagen (inliers=%s). Fallback auf Direktlösung.", inliers)
+        H, mask = cv2.findHomography(src, dst, 0)
+        inliers = int(mask.sum()) if mask is not None else inliers
     if H is None:
-        raise RuntimeError("Homographie konnte nicht berechnet werden")
-    LOGGER.info("Homographie berechnet. mask=%s", mask.ravel().tolist())
+        raise RuntimeError("Homographie konnte nicht berechnet werden – Punkte bitte erneut setzen.")
+    LOGGER.info(
+        "Homographie berechnet. inliers=%s mask=%s",
+        inliers,
+        mask.ravel().tolist() if mask is not None else None,
+    )
     save_calibration(H, camera_points, screen_points)
     return CalibrationData(homography=H, camera_points=camera_points, screen_points=screen_points)
 
