@@ -109,8 +109,7 @@ class ChickenApp(BaseApp):
                 self.audio_available = False
         self.base_flight_frames = _load_images(ASSETS_DIR / "chicken_flight")
         self.base_death_frames = _load_images(ASSETS_DIR / "chicken_flight_death")
-        self.cursor_image = pygame.image.load(str(ASSETS_DIR / "cursor" / "cursor.png")).convert_alpha()
-        self.cursor_red = pygame.image.load(str(ASSETS_DIR / "cursor" / "cursorred.png")).convert_alpha()
+        self.cursor_image, self.cursor_red = self._load_cursors()
         self.background_layers = self._load_background(screen)
         self.menu_background = pygame.image.load(str(ASSETS_DIR / "main_menu_background" / "main_menu.png")).convert()
         self.menu_logo = pygame.image.load(str(ASSETS_DIR / "main_menu_background" / "moorhuhn.png")).convert_alpha()
@@ -128,6 +127,23 @@ class ChickenApp(BaseApp):
         self.flash_timer = 0.0
         self.crosshair_flash = False
         self.ambient_channel: pygame.mixer.Channel | None = None
+
+    def _load_cursors(self) -> Tuple[pygame.Surface, pygame.Surface]:
+        cursor_path = ASSETS_DIR / "cursor" / "cursor.png"
+        cursor_red_path = ASSETS_DIR / "cursor" / "cursorred.png"
+
+        base_cursor = pygame.image.load(str(cursor_path)).convert_alpha()
+
+        if cursor_red_path.exists():
+            cursor_red = pygame.image.load(str(cursor_red_path)).convert_alpha()
+        else:
+            LOGGER.warning("Roter Cursor fehlt (%s), verwende eingefärbte Version des Standards.", cursor_red_path)
+            cursor_red = base_cursor.copy()
+            tint = pygame.Surface(cursor_red.get_size(), pygame.SRCALPHA)
+            tint.fill((255, 0, 0, 120))
+            cursor_red.blit(tint, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)
+
+        return base_cursor, cursor_red
 
     def _load_sounds(self) -> Dict[str, Union[pygame.mixer.Sound, _SilentSound]]:
         if not self.audio_available:
