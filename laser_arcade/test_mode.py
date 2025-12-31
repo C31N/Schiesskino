@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
 from dataclasses import dataclass
 from math import gcd
 from pathlib import Path
@@ -154,14 +155,31 @@ class TestMode:
                 options.append(self._probe_camera(index, f"/dev/video{index}"))
         return options
 
+    @contextmanager
+    def _silence_opencv_logs(self):
+        """Suppress noisy OpenCV warnings while probing unavailable cameras."""
+        try:
+            get_level = cv2.utils.logging.getLogLevel
+            set_level = cv2.utils.logging.setLogLevel
+            original_level = get_level()
+            set_level(cv2.utils.logging.LOG_LEVEL_ERROR)
+            try:
+                yield
+            finally:
+                set_level(original_level)
+        except AttributeError:
+            # Older OpenCV builds might not have utils.logging
+            yield
+
     def _probe_camera(self, index: int, path: str) -> CameraOption:
-        cap = cv2.VideoCapture(index, cv2.CAP_V4L2)
-        available = cap.isOpened()
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) if available else 0
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) if available else 0
-        fps = int(cap.get(cv2.CAP_PROP_FPS)) if available else 0
-        if cap is not None:
-            cap.release()
+        with self._silence_opencv_logs():
+            cap = cv2.VideoCapture(index, cv2.CAP_V4L2)
+            available = cap.isOpened()
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) if available else 0
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) if available else 0
+            fps = int(cap.get(cv2.CAP_PROP_FPS)) if available else 0
+            if cap is not None:
+                cap.release()
         width = width if width > 0 else self.settings.camera.width
         height = height if height > 0 else self.settings.camera.height
         fps = fps if fps > 0 else self.settings.camera.fps
