@@ -30,6 +30,10 @@ class LaserTracker:
         self.cap: Optional[cv2.VideoCapture] = None
         self.last_point: Optional[np.ndarray] = None
 
+    def reset_state(self) -> None:
+        """Reset stateful detection helpers after parameter changes."""
+        self.last_point = None
+
     def start(self) -> None:
         cam = self.settings.camera
         self.cap = cv2.VideoCapture(cam.device_index, cv2.CAP_V4L2)

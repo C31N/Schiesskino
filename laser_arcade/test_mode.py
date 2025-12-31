@@ -56,6 +56,51 @@ class CameraFormatOption:
         return f"{self.width}x{self.height} @ {self.fps}fps ({ratio})"
 
 
+@dataclass
+class SliderControl:
+    label: str
+    rect: pygame.Rect
+    min_value: float
+    max_value: float
+    step: float
+    getter: Callable[[], float]
+    setter: Callable[[float], None]
+    fmt: str = "{:.0f}"
+
+    def draw(self, surface: pygame.Surface, font: pygame.font.Font) -> None:
+        value = self.getter()
+        clamped = max(self.min_value, min(self.max_value, value))
+        fraction = 0 if self.max_value == self.min_value else (clamped - self.min_value) / (self.max_value - self.min_value)
+        bar_rect = self.rect.inflate(-4, -14)
+        fill_width = int(bar_rect.width * fraction)
+        pygame.draw.rect(surface, (50, 60, 90), self.rect, border_radius=8)
+        pygame.draw.rect(surface, (90, 120, 180), bar_rect, 1, border_radius=6)
+        if fill_width > 0:
+            pygame.draw.rect(
+                surface,
+                (80, 170, 120),
+                pygame.Rect(bar_rect.x, bar_rect.y, fill_width, bar_rect.height),
+                border_radius=6,
+            )
+        handle_x = bar_rect.x + fill_width
+        pygame.draw.rect(surface, (240, 240, 240), pygame.Rect(handle_x - 4, bar_rect.y - 2, 8, bar_rect.height + 4))
+        label_txt = f"{self.label}: {self.fmt.format(value)}"
+        text = font.render(label_txt, True, (230, 230, 230))
+        surface.blit(text, (self.rect.x + 6, self.rect.y + 4))
+
+    def handle_click(self, pos: Tuple[int, int]) -> bool:
+        if not self.rect.collidepoint(pos):
+            return False
+        rel_x = pos[0] - self.rect.x
+        fraction = rel_x / self.rect.width
+        raw_value = self.min_value + fraction * (self.max_value - self.min_value)
+        steps = round((raw_value - self.min_value) / self.step)
+        new_value = self.min_value + steps * self.step
+        new_value = max(self.min_value, min(self.max_value, new_value))
+        self.setter(new_value)
+        return True
+
+
 class TestMode:
     name = "Testmodus"
 
@@ -67,6 +112,7 @@ class TestMode:
         last_point_provider,
         on_camera_change: Optional[Callable[[], Tuple[bool, Optional[str]]]] = None,
         on_resolution_change: Optional[Callable[[], Optional[str]]] = None,
+        on_laser_change: Optional[Callable[[], None]] = None,
     ):
         self.screen = screen
         self.font = make_font(22)
@@ -79,6 +125,7 @@ class TestMode:
         self.last_detection: Optional[LaserDetection] = None
         self.on_camera_change = on_camera_change
         self.on_resolution_change = on_resolution_change
+        self.on_laser_change = on_laser_change
         self.camera_ok = True
         self.camera_error: Optional[str] = None
 
@@ -99,9 +146,13 @@ class TestMode:
         self.apply_button: Optional[Button] = None
         self.reload_button: Optional[Button] = None
         self.status_message: Optional[str] = None
+        self.laser_status_message: Optional[str] = None
         self.last_frame_preview = None
         self.last_mask_preview = None
+        self.laser_sliders: List[SliderControl] = []
+        self.preset_buttons: List[Button] = []
         self._build_buttons()
+        self._build_laser_controls()
 
     def set_detection(self, detection: Optional[LaserDetection]) -> None:
         self.last_detection = detection
@@ -137,6 +188,14 @@ class TestMode:
                     return
             if self.reload_button and self.reload_button.contains(pos):
                 self.reload_button.action()
+                return
+            for btn in self.preset_buttons:
+                if btn.contains(pos):
+                    btn.action()
+                    return
+            for slider in self.laser_sliders:
+                if slider.handle_click(pos):
+                    return
 
     def update(self, dt: float) -> None:
         return
@@ -256,6 +315,186 @@ class TestMode:
             "button_x": panel_rect.x + inner_padding,
             "button_width": button_width,
         }
+
+    def _laser_panel_rect(self) -> pygame.Rect:
+        panel_width = self.screen.get_width() - self._panel_metrics()["panel_width"] - 50
+        panel_width = max(400, panel_width)
+        panel_height = 360
+        x = 20
+        y = self.screen.get_height() - panel_height - 18
+        return pygame.Rect(x, y, panel_width, panel_height)
+
+    def _laser_presets(self) -> dict:
+        return {
+            "Standard": {
+                "lower1": (0, 120, 120),
+                "upper1": (8, 255, 255),
+                "lower2": (170, 120, 120),
+                "upper2": (180, 255, 255),
+                "min_area": 12,
+                "max_area": 4000,
+                "morph_kernel": 3,
+            },
+            "CP99": {
+                "lower1": (0, 90, 110),
+                "upper1": (12, 255, 255),
+                "lower2": (165, 90, 110),
+                "upper2": (180, 255, 255),
+                "min_area": 10,
+                "max_area": 4500,
+                "morph_kernel": 5,
+            },
+        }
+
+    def _persist_laser_settings(self, message: str | None = None) -> None:
+        save_settings(self.settings)
+        if self.on_laser_change:
+            try:
+                self.on_laser_change()
+            except Exception:
+                LOGGER.exception("Laser-Änderung konnte nicht angewandt werden.")
+        self.laser_status_message = message or "Laser-Einstellungen gespeichert."
+
+    def _make_tuple_setter(self, attr: str, idx: int, min_val: int, max_val: int) -> Callable[[float], None]:
+        def setter(value: float) -> None:
+            clamped = int(max(min_val, min(max_val, value)))
+            current = list(getattr(self.settings.laser, attr))
+            current[idx] = clamped
+            setattr(self.settings.laser, attr, tuple(current))
+            self._persist_laser_settings(f"{attr} angepasst.")
+
+        return setter
+
+    def _build_laser_controls(self) -> None:
+        self.laser_sliders = []
+        self.preset_buttons = []
+        panel = self._laser_panel_rect()
+        btn_width = 120
+        btn_height = 32
+        preset_spacing = 8
+        preset_y = panel.y + 40
+        preset_x = panel.x + 12
+        for idx, (label, preset) in enumerate(self._laser_presets().items()):
+            rect = pygame.Rect(preset_x + idx * (btn_width + preset_spacing), preset_y, btn_width, btn_height)
+            self.preset_buttons.append(
+                Button(
+                    rect=rect,
+                    label=label,
+                    action=lambda p=preset, name=label: self._apply_preset(p, name),
+                    font=self.button_font,
+                    bg_color=(90, 120, 180),
+                )
+            )
+
+        slider_cols = 3
+        col_padding = 12
+        row_height = 38
+        available_width = panel.width - (slider_cols + 1) * col_padding
+        slider_width = max(160, available_width // slider_cols)
+        start_y = preset_y + btn_height + 12
+        slider_rects: List[pygame.Rect] = []
+        for idx in range(15):
+            col = idx % slider_cols
+            row = idx // slider_cols
+            x = panel.x + col_padding + col * (slider_width + col_padding)
+            y = start_y + row * (row_height + 6)
+            slider_rects.append(pygame.Rect(x, y, slider_width, row_height))
+
+        laser = self.settings.laser
+        slider_defs = [
+            ("H lower1", slider_rects[0], 0, 180, 1, lambda: laser.lower1[0], self._make_tuple_setter("lower1", 0, 0, 180)),
+            ("S lower1", slider_rects[1], 0, 255, 1, lambda: laser.lower1[1], self._make_tuple_setter("lower1", 1, 0, 255)),
+            ("V lower1", slider_rects[2], 0, 255, 1, lambda: laser.lower1[2], self._make_tuple_setter("lower1", 2, 0, 255)),
+            ("H upper1", slider_rects[3], 0, 180, 1, lambda: laser.upper1[0], self._make_tuple_setter("upper1", 0, 0, 180)),
+            ("S upper1", slider_rects[4], 0, 255, 1, lambda: laser.upper1[1], self._make_tuple_setter("upper1", 1, 0, 255)),
+            ("V upper1", slider_rects[5], 0, 255, 1, lambda: laser.upper1[2], self._make_tuple_setter("upper1", 2, 0, 255)),
+            ("H lower2", slider_rects[6], 0, 180, 1, lambda: laser.lower2[0], self._make_tuple_setter("lower2", 0, 0, 180)),
+            ("S lower2", slider_rects[7], 0, 255, 1, lambda: laser.lower2[1], self._make_tuple_setter("lower2", 1, 0, 255)),
+            ("V lower2", slider_rects[8], 0, 255, 1, lambda: laser.lower2[2], self._make_tuple_setter("lower2", 2, 0, 255)),
+            ("H upper2", slider_rects[9], 0, 180, 1, lambda: laser.upper2[0], self._make_tuple_setter("upper2", 0, 0, 180)),
+            ("S upper2", slider_rects[10], 0, 255, 1, lambda: laser.upper2[1], self._make_tuple_setter("upper2", 1, 0, 255)),
+            ("V upper2", slider_rects[11], 0, 255, 1, lambda: laser.upper2[2], self._make_tuple_setter("upper2", 2, 0, 255)),
+            ("Min Area", slider_rects[12], 1, 8000, 5, lambda: laser.min_area, self._set_min_area,),
+            ("Max Area", slider_rects[13], 100, 20000, 20, lambda: laser.max_area, self._set_max_area,),
+            ("Morph Kernel", slider_rects[14], 1, 15, 1, lambda: laser.morph_kernel, self._set_morph_kernel,),
+        ]
+        for label, rect, min_v, max_v, step, getter, setter in slider_defs:
+            self.laser_sliders.append(
+                SliderControl(
+                    label=label,
+                    rect=rect,
+                    min_value=min_v,
+                    max_value=max_v,
+                    step=step,
+                    getter=getter,
+                    setter=setter,
+                )
+            )
+        extra_start = start_y + ((len(slider_defs) - 1) // slider_cols + 1) * (row_height + 6)
+        extra_rects = [
+            pygame.Rect(panel.x + col_padding, extra_start, slider_width, row_height),
+            pygame.Rect(panel.x + col_padding * 2 + slider_width, extra_start, slider_width, row_height),
+        ]
+        self.laser_sliders.append(
+            SliderControl(
+                label="EMA Alpha",
+                rect=extra_rects[0],
+                min_value=0.05,
+                max_value=1.0,
+                step=0.05,
+                getter=lambda: self.settings.ema_alpha,
+                setter=self._set_ema_alpha,
+                fmt="{:.2f}",
+            )
+        )
+        self.laser_sliders.append(
+            SliderControl(
+                label="Dwell (ms)",
+                rect=extra_rects[1],
+                min_value=100,
+                max_value=1200,
+                step=25,
+                getter=lambda: self.settings.dwell_ms,
+                setter=self._set_dwell_ms,
+            )
+        )
+
+    def _apply_preset(self, preset: dict, name: str) -> None:
+        for key, value in preset.items():
+            if hasattr(self.settings.laser, key):
+                setattr(self.settings.laser, key, value)
+        self._persist_laser_settings(f"Preset '{name}' geladen.")
+        self._build_laser_controls()
+
+    def _set_min_area(self, value: float) -> None:
+        min_area = int(max(1, value))
+        self.settings.laser.min_area = min_area
+        if self.settings.laser.max_area < min_area:
+            self.settings.laser.max_area = min_area + 50
+        self._persist_laser_settings("min_area angepasst.")
+
+    def _set_max_area(self, value: float) -> None:
+        max_area = int(max(10, value))
+        min_area = min(self.settings.laser.min_area, max_area - 1)
+        self.settings.laser.min_area = min_area
+        self.settings.laser.max_area = max_area
+        self._persist_laser_settings("max_area angepasst.")
+
+    def _set_morph_kernel(self, value: float) -> None:
+        kernel = int(max(1, value))
+        if kernel % 2 == 0:
+            kernel += 1
+        self.settings.laser.morph_kernel = kernel
+        self._persist_laser_settings("Morph-Kernel angepasst.")
+        self._build_laser_controls()
+
+    def _set_ema_alpha(self, value: float) -> None:
+        self.settings.ema_alpha = round(max(0.05, min(1.0, value)), 2)
+        self._persist_laser_settings("EMA Alpha angepasst.")
+
+    def _set_dwell_ms(self, value: float) -> None:
+        self.settings.dwell_ms = int(max(50, value))
+        self._persist_laser_settings("Dwell-Timer angepasst.")
 
     def _build_buttons(self) -> None:
         self.camera_buttons = []
@@ -474,10 +713,12 @@ class TestMode:
             "Einstellungen werden nach Auswahl gespeichert und Kamera neu gestartet.",
             "Nutze das Bild zum Ausrichten und zur Belichtung (z.B. v4l2-ctl).",
         ]
+        info_base_y = min(420, self._laser_panel_rect().y - len(info_lines) * 24 - 8)
         for idx, line in enumerate(info_lines):
             info = self.info_font.render(line, True, (230, 230, 230))
-            self.screen.blit(info, (20, 420 + idx * 28))
+            self.screen.blit(info, (20, info_base_y + idx * 24))
 
+        self._draw_laser_panel(detection)
         self._draw_camera_panel()
 
     def _draw_camera_panel(self) -> None:
@@ -540,7 +781,50 @@ class TestMode:
         if self.reload_button:
             self.reload_button.draw(self.screen)
 
+    def _draw_laser_panel(self, detection: Optional[LaserDetection]) -> None:
+        panel_rect = self._laser_panel_rect()
+        pygame.draw.rect(self.screen, (24, 30, 36), panel_rect, border_radius=10)
+        pygame.draw.rect(self.screen, (70, 90, 110), panel_rect, 2, border_radius=10)
+
+        title = self.font.render("Laser-Erkennung", True, (240, 240, 255))
+        self.screen.blit(title, (panel_rect.x + 12, panel_rect.y + 8))
+        subtitle = self.info_font.render("HSV + Bereich + Kernel", True, (200, 200, 210))
+        self.screen.blit(subtitle, (panel_rect.x + 14, panel_rect.y + 28))
+
+        if self.laser_status_message:
+            status = self.info_font.render(self.laser_status_message, True, (140, 220, 160))
+            self.screen.blit(status, (panel_rect.x + 12, panel_rect.y + 52))
+
+        for btn in self.preset_buttons:
+            btn.draw(self.screen)
+
+        for slider in self.laser_sliders:
+            slider.draw(self.screen, self.info_font)
+
+        if detection:
+            indicator_x = panel_rect.right - 130
+            indicator_y = panel_rect.y + 14
+            color = (90, 190, 110) if detection.point else (200, 120, 120)
+            pygame.draw.circle(self.screen, color, (indicator_x, indicator_y), 10)
+            txt = self.info_font.render(f"Area {detection.area:.0f} | Conf {detection.confidence:.2f}", True, (220, 220, 220))
+            self.screen.blit(txt, (indicator_x + 14, indicator_y - 8))
+
+        mask_preview = detection.mask_preview if detection and detection.mask_preview is not None else self.last_mask_preview
+        if mask_preview is not None:
+            try:
+                surf = pygame.image.frombuffer(
+                    mask_preview.tobytes(),
+                    mask_preview.shape[1::-1],
+                    "RGB",
+                )
+                preview_rect = surf.get_rect(bottomright=(panel_rect.right - 10, panel_rect.bottom - 10))
+                pygame.draw.rect(self.screen, (120, 180, 120), preview_rect.inflate(6, 6), 1)
+                self.screen.blit(surf, preview_rect)
+            except Exception:
+                LOGGER.debug("Konnte Masken-Indikator nicht anzeigen", exc_info=True)
+
     def update_context(self, screen: pygame.Surface, homography) -> None:
         self.screen = screen
         self.homography = homography
         self._build_buttons()
+        self._build_laser_controls()

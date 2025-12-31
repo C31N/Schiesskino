@@ -203,6 +203,12 @@ def main() -> None:
         dwell_radius=settings.dwell_radius,
     )
 
+    def on_laser_settings_changed() -> None:
+        nonlocal tracker
+        if tracker:
+            tracker.reset_state()
+        pointer_router.update_dwell(settings.dwell_ms, settings.dwell_radius)
+
     calibration_active = False
     def start_app(label: str):
         nonlocal active_app, calibration_active, test_mode
@@ -221,6 +227,7 @@ def main() -> None:
                 lambda: last_laser_point,
                 on_camera_change=restart_tracker,
                 on_resolution_change=reinitialize_display,
+                on_laser_change=on_laser_settings_changed,
             )
             test_mode.set_camera_status(camera_ok, camera_error)
         else:
