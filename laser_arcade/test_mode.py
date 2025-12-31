@@ -69,9 +69,9 @@ class TestMode:
         on_resolution_change: Optional[Callable[[], Optional[str]]] = None,
     ):
         self.screen = screen
-        self.font = make_font(26)
-        self.info_font = make_font(20)
-        self.button_font = make_font(18)
+        self.font = make_font(22)
+        self.info_font = make_font(17)
+        self.button_font = make_font(16)
         self.settings = settings
         self.homography = homography
         self.last_point_provider = last_point_provider
@@ -231,15 +231,42 @@ class TestMode:
                 return opt
         return self.resolution_options[0] if self.resolution_options else None
 
+    def _panel_metrics(self) -> dict:
+        panel_width = 260
+        panel_margin = 14
+        panel_top = 32
+        panel_height = self.screen.get_height() - 64
+        panel_x = self.screen.get_width() - panel_width - panel_margin
+        panel_rect = pygame.Rect(panel_x, panel_top, panel_width, panel_height)
+        title_y = panel_rect.y + 10
+        hint_y = title_y + self.font.get_linesize() + 4
+        status_y = hint_y + self.info_font.get_linesize() + 6
+        status_line_height = self.info_font.get_linesize() + 2
+        camera_section_y = status_y + status_line_height * 3 + 12
+        camera_buttons_top = camera_section_y + self.info_font.get_linesize() + 4
+        inner_padding = 10
+        button_width = panel_width - inner_padding * 2
+
+        return {
+            "panel_rect": panel_rect,
+            "panel_width": panel_width,
+            "status_y": status_y,
+            "camera_section_y": camera_section_y,
+            "camera_buttons_top": camera_buttons_top,
+            "button_x": panel_rect.x + inner_padding,
+            "button_width": button_width,
+        }
+
     def _build_buttons(self) -> None:
         self.camera_buttons = []
         self.format_buttons = []
         self.resolution_buttons = []
-        panel_width = 380
-        x = self.screen.get_width() - panel_width - 20
-        y = 100
-        spacing = 10
-        button_height = 46
+        metrics = self._panel_metrics()
+        panel_width = metrics["button_width"]
+        x = metrics["button_x"]
+        y = metrics["camera_buttons_top"]
+        spacing = 8
+        button_height = 38
         for idx, opt in enumerate(self.camera_options):
             rect = pygame.Rect(x, y + idx * (button_height + spacing), panel_width, button_height)
             bg_color = (60, 120, 200) if opt.available else (90, 90, 90)
@@ -254,17 +281,17 @@ class TestMode:
                     bg_color=bg_color,
                 )
             )
-        apply_y = y + max(len(self.camera_options), 1) * (button_height + spacing) + 10
+        apply_y = y + max(len(self.camera_options), 1) * (button_height + spacing) + 4
         self.apply_button = Button(
-            rect=pygame.Rect(x, apply_y, panel_width, 50),
+            rect=pygame.Rect(x, apply_y, panel_width, 44),
             label="Übernehmen/Speichern",
             action=self._apply_selection,
             font=self.button_font,
             bg_color=(40, 160, 80),
         )
 
-        format_section_y = apply_y + 70
-        format_button_height = 40
+        format_section_y = apply_y + self.apply_button.rect.height + 12
+        format_button_height = 34
         for idx, opt in enumerate(self.format_options):
             rect = pygame.Rect(
                 x,
@@ -289,8 +316,8 @@ class TestMode:
                 )
             )
 
-        res_section_y = format_section_y + max(len(self.format_options), 1) * (format_button_height + spacing) + 26
-        res_button_height = 42
+        res_section_y = format_section_y + max(len(self.format_options), 1) * (format_button_height + spacing) + 16
+        res_button_height = 36
         for idx, opt in enumerate(self.resolution_options):
             rect = pygame.Rect(x, res_section_y + idx * (res_button_height + spacing), panel_width, res_button_height)
             bg_color = (90, 110, 160)
@@ -309,9 +336,9 @@ class TestMode:
                 )
             )
 
-        reload_y = res_section_y + max(len(self.resolution_options), 1) * (res_button_height + spacing) + 6
+        reload_y = res_section_y + max(len(self.resolution_options), 1) * (res_button_height + spacing) + 4
         self.reload_button = Button(
-            rect=pygame.Rect(x, reload_y, panel_width, 50),
+            rect=pygame.Rect(x, reload_y, panel_width, 44),
             label="Übernehmen/Neu laden",
             action=self._apply_resolution,
             font=self.button_font,
@@ -454,19 +481,18 @@ class TestMode:
         self._draw_camera_panel()
 
     def _draw_camera_panel(self) -> None:
-        panel_width = 380
-        x = self.screen.get_width() - panel_width - 20
-        panel_rect = pygame.Rect(x, 40, panel_width, self.screen.get_height() - 80)
+        metrics = self._panel_metrics()
+        panel_rect = metrics["panel_rect"]
         pygame.draw.rect(self.screen, (28, 28, 40), panel_rect, border_radius=10)
         pygame.draw.rect(self.screen, (80, 80, 120), panel_rect, 2, border_radius=10)
 
         title = self.font.render("Kamera- & Anzeige", True, (255, 255, 255))
-        self.screen.blit(title, (panel_rect.x + 16, panel_rect.y + 14))
+        self.screen.blit(title, (panel_rect.x + 12, panel_rect.y + 10))
 
         hint = self.info_font.render("Standard: Logitech C922 PRO", True, (210, 210, 210))
-        self.screen.blit(hint, (panel_rect.x + 16, panel_rect.y + 46))
+        self.screen.blit(hint, (panel_rect.x + 12, panel_rect.y + 32))
 
-        status_y = panel_rect.y + 74
+        status_y = metrics["status_y"]
         status_lines = [
             f"Kamera: {self.selected_option.label() if self.selected_option else '—'}",
             f"Format: {self.selected_format.label() if self.selected_format else '—'}",
@@ -474,40 +500,40 @@ class TestMode:
         ]
         for idx, line in enumerate(status_lines):
             surf = self.info_font.render(line, True, (220, 220, 220))
-            self.screen.blit(surf, (panel_rect.x + 16, status_y + idx * 22))
+            self.screen.blit(surf, (panel_rect.x + 12, status_y + idx * 20))
 
         if not self.camera_ok:
             error_txt = self.info_font.render(
                 self.camera_error or "Gerät nicht verfügbar.", True, (240, 120, 120)
             )
-            self.screen.blit(error_txt, (panel_rect.x + 16, status_y + 44))
+            self.screen.blit(error_txt, (panel_rect.x + 12, status_y + 44))
         elif self.status_message:
             status_txt = self.info_font.render(self.status_message, True, (140, 220, 140))
-            self.screen.blit(status_txt, (panel_rect.x + 16, status_y + 44))
+            self.screen.blit(status_txt, (panel_rect.x + 12, status_y + 44))
 
-        camera_section_y = status_y + 80
+        camera_section_y = metrics["camera_section_y"]
         cam_title = self.info_font.render("Kamera-Geräte", True, (230, 230, 250))
-        self.screen.blit(cam_title, (panel_rect.x + 16, camera_section_y))
+        self.screen.blit(cam_title, (panel_rect.x + 12, camera_section_y))
 
         for btn in self.camera_buttons:
             btn.draw(self.screen)
         if self.apply_button:
             self.apply_button.draw(self.screen)
 
-        format_section_y = self.apply_button.rect.bottom + 20 if self.apply_button else camera_section_y + 100
+        format_section_y = self.apply_button.rect.bottom + 12 if self.apply_button else camera_section_y + 80
         format_title = self.info_font.render("Kamera-Format", True, (230, 230, 250))
-        self.screen.blit(format_title, (panel_rect.x + 16, format_section_y))
+        self.screen.blit(format_title, (panel_rect.x + 12, format_section_y))
 
         for btn in self.format_buttons:
             btn.draw(self.screen)
 
         res_section_y = (
-            self.format_buttons[-1].rect.bottom + 30
+            self.format_buttons[-1].rect.bottom + 16
             if self.format_buttons
-            else format_section_y + 100
+            else format_section_y + 80
         )
         res_title = self.info_font.render("Anzeige-Auflösung", True, (230, 230, 250))
-        self.screen.blit(res_title, (panel_rect.x + 16, res_section_y))
+        self.screen.blit(res_title, (panel_rect.x + 12, res_section_y))
 
         for btn in self.resolution_buttons:
             btn.draw(self.screen)
