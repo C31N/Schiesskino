@@ -64,6 +64,9 @@ class PointerRouter:
         self.last_pos: Optional[Tuple[int, int]] = None
         self.source = "laser"
 
+    def update_dwell(self, dwell_ms: int, dwell_radius: int) -> None:
+        self.detector = DwellClickDetector(dwell_ms=dwell_ms, radius_px=dwell_radius)
+
     def feed_point(self, point: Optional[Tuple[int, int]], source: str = "laser") -> None:
         now = time.time()
         self.source = source
