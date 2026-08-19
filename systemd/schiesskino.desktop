@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Schießkino starten
+Comment=Laser-Schießkino starten
+Icon=/home/pi/Schiesskino/assets/schiesskino.svg
+Exec=/home/pi/Schiesskino/scripts/start_laser_arcade.sh
+Path=/home/pi/Schiesskino
+Terminal=false
+StartupNotify=false
+Categories=Game;

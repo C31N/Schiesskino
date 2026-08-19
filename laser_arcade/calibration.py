@@ -25,14 +25,47 @@ def build_calib_points(width: int, height: int) -> List[Tuple[int, int]]:
     ]
 
 
+def validate_camera_quad(
+    camera_points: List[Tuple[int, int]],
+    frame_size: Tuple[int, int],
+) -> tuple[bool, str]:
+    """Prüft einen manuell gezogenen TL/TR/BR/BL-Leinwandrahmen."""
+
+    if len(camera_points) != 4:
+        return False, "Es werden genau vier Ecken benötigt"
+    width, height = frame_size
+    points = np.asarray(camera_points, dtype=np.float32)
+    if not np.isfinite(points).all():
+        return False, "Eine Ecke enthält keinen gültigen Wert"
+    if bool(
+        (points[:, 0] < 0).any()
+        or (points[:, 0] >= width).any()
+        or (points[:, 1] < 0).any()
+        or (points[:, 1] >= height).any()
+    ):
+        return False, "Alle Ecken müssen innerhalb des Kamerabildes liegen"
+    contour = np.rint(points).astype(np.int32).reshape(-1, 1, 2)
+    if not cv2.isContourConvex(contour):
+        return False, "Die Kanten dürfen sich nicht kreuzen"
+    area = abs(float(cv2.contourArea(contour)))
+    if area < width * height * 0.15:
+        return False, "Die markierte Leinwandfläche ist zu klein"
+    edges = np.roll(points, -1, axis=0) - points
+    if float(np.linalg.norm(edges, axis=1).min()) < 35.0:
+        return False, "Zwei Ecken liegen zu dicht beieinander"
+    return True, "Ausrichtung ist gültig"
+
+
 @dataclass
 class CalibrationData:
     homography: Optional[np.ndarray]
     camera_points: List[Tuple[int, int]]
     screen_points: List[Tuple[int, int]]
+    alignment_mode: str = "automatic"
+    source_size: Optional[Tuple[int, int]] = None
 
 
-def compute_homography(
+def calculate_homography(
     camera_points: List[Tuple[int, int]],
     screen_points: Optional[List[Tuple[int, int]]] = None,
 ) -> CalibrationData:
@@ -60,8 +93,29 @@ def compute_homography(
         inliers,
         mask.ravel().tolist() if mask is not None else None,
     )
-    save_calibration(H, camera_points, screen_points)
     return CalibrationData(homography=H, camera_points=camera_points, screen_points=screen_points)
+
+
+def compute_homography(
+    camera_points: List[Tuple[int, int]],
+    screen_points: Optional[List[Tuple[int, int]]] = None,
+    *,
+    alignment_mode: str = "automatic",
+    source_size: Optional[Tuple[int, int]] = None,
+) -> CalibrationData:
+    """Berechnet und speichert eine bestätigte Ausrichtung."""
+
+    data = calculate_homography(camera_points, screen_points)
+    data.alignment_mode = alignment_mode
+    data.source_size = source_size
+    save_calibration(
+        data.homography,
+        data.camera_points,
+        data.screen_points,
+        alignment_mode=alignment_mode,
+        source_size=source_size,
+    )
+    return data
 
 
 def load_homography(screen_points: Optional[List[Tuple[int, int]]] = None) -> CalibrationData:
@@ -82,6 +136,17 @@ def load_homography(screen_points: Optional[List[Tuple[int, int]]] = None) -> Ca
         homography=H,
         camera_points=camera_points,
         screen_points=stored_screen_points,
+        alignment_mode=(
+            stored.get("alignment_mode")
+            if stored.get("alignment_mode") in {"automatic", "manual"}
+            else "automatic"
+        ),
+        source_size=(
+            tuple(int(value) for value in stored["source_size"])
+            if isinstance(stored.get("source_size"), list)
+            and len(stored["source_size"]) == 2
+            else None
+        ),
     )
 
 

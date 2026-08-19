@@ -3,3 +3,7 @@ __pycache__/
 *.pyc
 laser_arcade/settings.json
 laser_arcade/apps/*/venv/
+water_alarm.py
+test_water_alarm.py
+tmp/diagnostic_ui.py
+tmp/test_camera_settings.py

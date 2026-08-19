@@ -401,6 +401,7 @@ class TestMode:
             slider_rects.append(pygame.Rect(x, y, slider_width, row_height))
 
         laser = self.settings.laser
+        detection_profile = laser.normal
         slider_defs = [
             ("H lower1", slider_rects[0], 0, 180, 1, lambda: laser.lower1[0], self._make_tuple_setter("lower1", 0, 0, 180)),
             ("S lower1", slider_rects[1], 0, 255, 1, lambda: laser.lower1[1], self._make_tuple_setter("lower1", 1, 0, 255)),
@@ -414,8 +415,8 @@ class TestMode:
             ("H upper2", slider_rects[9], 0, 180, 1, lambda: laser.upper2[0], self._make_tuple_setter("upper2", 0, 0, 180)),
             ("S upper2", slider_rects[10], 0, 255, 1, lambda: laser.upper2[1], self._make_tuple_setter("upper2", 1, 0, 255)),
             ("V upper2", slider_rects[11], 0, 255, 1, lambda: laser.upper2[2], self._make_tuple_setter("upper2", 2, 0, 255)),
-            ("Min Area", slider_rects[12], 1, 8000, 5, lambda: laser.min_area, self._set_min_area,),
-            ("Max Area", slider_rects[13], 100, 20000, 20, lambda: laser.max_area, self._set_max_area,),
+            ("Min Area", slider_rects[12], 1, 20, 1, lambda: detection_profile.min_area, self._set_min_area,),
+            ("Max Area", slider_rects[13], 20, 1400, 20, lambda: detection_profile.max_area, self._set_max_area,),
             ("Morph Kernel", slider_rects[14], 1, 15, 1, lambda: laser.morph_kernel, self._set_morph_kernel,),
         ]
         for label, rect, min_v, max_v, step, getter, setter in slider_defs:
@@ -463,21 +464,23 @@ class TestMode:
         for key, value in preset.items():
             if hasattr(self.settings.laser, key):
                 setattr(self.settings.laser, key, value)
+            elif hasattr(self.settings.laser.normal, key):
+                setattr(self.settings.laser.normal, key, value)
         self._persist_laser_settings(f"Preset '{name}' geladen.")
         self._build_laser_controls()
 
     def _set_min_area(self, value: float) -> None:
         min_area = int(max(1, value))
-        self.settings.laser.min_area = min_area
-        if self.settings.laser.max_area < min_area:
-            self.settings.laser.max_area = min_area + 50
+        self.settings.laser.normal.min_area = min_area
+        if self.settings.laser.normal.max_area < min_area:
+            self.settings.laser.normal.max_area = min_area + 50
         self._persist_laser_settings("min_area angepasst.")
 
     def _set_max_area(self, value: float) -> None:
         max_area = int(max(10, value))
-        min_area = min(self.settings.laser.min_area, max_area - 1)
-        self.settings.laser.min_area = min_area
-        self.settings.laser.max_area = max_area
+        min_area = min(self.settings.laser.normal.min_area, max_area - 1)
+        self.settings.laser.normal.min_area = min_area
+        self.settings.laser.normal.max_area = max_area
         self._persist_laser_settings("max_area angepasst.")
 
     def _set_morph_kernel(self, value: float) -> None:
